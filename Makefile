@@ -26,4 +26,13 @@ instr-table.tex: $(ALL_OPCODES) parse-opcodes
 priv-instr-table.tex: $(ALL_OPCODES) parse-opcodes
 	cat opcodes opcodes-pseudo | ./parse-opcodes -privtex > $@
 
+RISCV_GNU_TOOLCHAIN = ../../riscv-gnu-toolchain
+
+$(RISCV_GNU_TOOLCHAIN)/riscv-binutils/include/opcode/riscv-opc.h\
+		$(RISCV_GNU_TOOLCHAIN)/riscv-gdb/include/opcode/riscv-opc.h:\
+		$(ALL_OPCODES)\
+		parse-opcodes 
+	cat $(ALL_OPCODES) |\
+	./parse-opcodes -c > $@
+
 .PHONY : install

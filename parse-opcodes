@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#! /usr/bin/env python2.7
 
 import math
 import sys
@@ -47,9 +47,24 @@ causes = [
   (0x0C, 'fetch page fault'),
   (0x0D, 'load page fault'),
   (0x0F, 'store page fault'),
+  (0x14, 'instruction guest page fault'),
+  (0x15, 'load guest page fault'),
+  (0x17, 'store guest page fault'),
 ]
 
 csrs = [
+  # User Trap Setup
+  (0x000, 'ustatus'),
+  (0x004, 'uie'),
+  (0x005, 'utvec'),
+
+  # User Trap Handling
+  (0x040, 'uscratch'),
+  (0x041, 'uepc'),
+  (0x042, 'ucause'),
+  (0x043, 'utval'),
+  (0x044, 'uip'),
+
   # Standard User R/W
   (0x001, 'fflags'),
   (0x002, 'frm'),
@@ -91,6 +106,8 @@ csrs = [
 
   # Standard Supervisor R/W
   (0x100, 'sstatus'),
+  (0x102, 'sedeleg'),
+  (0x103, 'sideleg'),
   (0x104, 'sie'),
   (0x105, 'stvec'),
   (0x106, 'scounteren'),
@@ -100,6 +117,44 @@ csrs = [
   (0x143, 'stval'),
   (0x144, 'sip'),
   (0x180, 'satp'),
+
+  # Hypervisor Trap Setup
+  (0x600, 'hstatus'),
+  (0x602, 'hedeleg'),
+  (0x603, 'hideleg'),
+  (0x604, 'hie'),
+  (0x606, 'hcounteren'),
+  (0x607, 'hgeie'),
+
+  # Hypervisor Trap Handling
+  (0x643, 'htval'),
+  (0x644, 'hip'),
+  (0x645, 'hvip'),
+  (0x64a, 'htinst'),
+  (0xe12, 'hgeip'),
+
+  # Hypervisor Protection and Translation
+  (0x680, 'hgatp'),
+
+  # Hypervisor Counter/Timer Virtualization Registers
+  (0x605, 'htimedelta'),
+
+  # Virtual Supervisor Registers
+  (0x200, 'vsstatus'),
+  (0x204, 'vsie'),
+  (0x205, 'vstvec'),
+  (0x240, 'vsscratch'),
+  (0x241, 'vsepc'),
+  (0x242, 'vscause'),
+  (0x243, 'vstval'),
+  (0x244, 'vsip'),
+  (0x280, 'vsatp'),
+
+  # Standard Machine RO
+  (0xF11, 'mvendorid'),
+  (0xF12, 'marchid'),
+  (0xF13, 'mimpid'),
+  (0xF14, 'mhartid'),
 
   # Standard Machine R/W
   (0x300, 'mstatus'),
@@ -114,6 +169,9 @@ csrs = [
   (0x342, 'mcause'),
   (0x343, 'mtval'),
   (0x344, 'mip'),
+  (0x34a, 'mtinst'), # Machine Trap Handling (hypervisor support)
+  (0x34b, 'mtval2'),
+
   (0x3a0, 'pmpcfg0'),
   (0x3a1, 'pmpcfg1'),
   (0x3a2, 'pmpcfg2'),
@@ -134,13 +192,7 @@ csrs = [
   (0x3bd, 'pmpaddr13'),
   (0x3be, 'pmpaddr14'),
   (0x3bf, 'pmpaddr15'),
-  (0x7a0, 'tselect'),
-  (0x7a1, 'tdata1'),
-  (0x7a2, 'tdata2'),
-  (0x7a3, 'tdata3'),
-  (0x7b0, 'dcsr'),
-  (0x7b1, 'dpc'),
-  (0x7b2, 'dscratch'),
+
   (0xB00, 'mcycle'),
   (0xB02, 'minstret'),
   (0xB03, 'mhpmcounter3'),
@@ -172,6 +224,8 @@ csrs = [
   (0xB1D, 'mhpmcounter29'),
   (0xB1E, 'mhpmcounter30'),
   (0xB1F, 'mhpmcounter31'),
+
+  (0x320, 'mcountinhibit'),
   (0x323, 'mhpmevent3'),
   (0x324, 'mhpmevent4'),
   (0x325, 'mhpmevent5'),
@@ -202,11 +256,16 @@ csrs = [
   (0x33E, 'mhpmevent30'),
   (0x33F, 'mhpmevent31'),
 
-  # Standard Machine RO
-  (0xF11, 'mvendorid'),
-  (0xF12, 'marchid'),
-  (0xF13, 'mimpid'),
-  (0xF14, 'mhartid'),
+  (0x7a0, 'tselect'),
+  (0x7a1, 'tdata1'),
+  (0x7a2, 'tdata2'),
+  (0x7a3, 'tdata3'),
+
+  (0x7b0, 'dcsr'),
+  (0x7b1, 'dpc'),
+  (0x7b2, 'dscratch0'),
+  (0x7b3, 'dscratch1'),
+
 ]
 
 csrs32 = [
@@ -244,7 +303,11 @@ csrs32 = [
   (0xC9E, 'hpmcounter30h'),
   (0xC9F, 'hpmcounter31h'),
 
+  # Hypervisor Counter/Timer Virtualization Registers
+  (0x615, 'htimedeltah'),
+
   # Standard Machine RW
+  (0x310, 'mstatush'),
   (0xB80, 'mcycleh'),
   (0xB82, 'minstreth'),
   (0xB83, 'mhpmcounter3h'),
@@ -278,6 +341,27 @@ csrs32 = [
   (0xB9F, 'mhpmcounter31h'),
 ]
 
+csr_1_9_1 = [
+  (0x380, 'mbase'),
+  (0x381, 'mbound'),
+  (0x382, 'mibase'),
+  (0x383, 'mibound'),
+  (0x384, 'mdbase'),
+  (0x385, 'mdbound'),
+  (0x321, 'mscounteren'),
+  (0x322, 'mhcounteren'),
+]
+
+csr_oldnames_1_9_1 = [
+  ('utval', 'ubadaddr'),
+  ('stval', 'sbadaddr'),
+  ('satp', 'sptbr'),
+  ('mtval', 'mbadaddr'),
+  ('mcountinhibit', 'mucounteren'),
+  ('dscratch0', 'dscratch'),
+]
+
+
 opcode_base = 0
 opcode_size = 7
 funct_base = 12
@@ -295,7 +379,7 @@ def make_c(match,mask):
     name2 = name.upper().replace('.','_')
     print '#define MATCH_%s %s' % (name2, hex(match[name]))
     print '#define MASK_%s  %s' % (name2, hex(mask[name]))
-  for num, name in csrs+csrs32:
+  for num, name in csrs+csrs32 + csr_1_9_1:
     print '#define CSR_%s %s' % (name.upper(), hex(num))
   for num, name in causes:
     print '#define CAUSE_%s %s' % (name.upper().replace(' ', '_'), hex(num))
@@ -310,6 +394,24 @@ def make_c(match,mask):
   print '#ifdef DECLARE_CSR'
   for num, name in csrs+csrs32:
     print 'DECLARE_CSR(%s, CSR_%s)' % (name, name.upper())
+
+  print '/* These registers are present in priv spec 1.9.1,',\
+          'dropped in 1.10.  */'
+  for num, name in csr_1_9_1:
+    print 'DECLARE_CSR(%s, CSR_%s)' % (name, name.upper())
+
+  print '#endif'
+
+  print '#ifdef DECLARE_CSR_ALIAS'
+  for regname, alias in csr_oldnames_1_9_1:
+    for num, name in csrs + csrs32:
+        if name == regname:
+            break
+    else:
+        raise AssertionError ('No match for alias register %s found' % alias)
+    print '/* %s is %#03x in 1.9.1, but %#03x is %s in 1.10/1.12.  */' % (
+            alias.capitalize(), num, num, regname)
+    print 'DECLARE_CSR_ALIAS(%s, CSR_%s)' % (alias, regname.upper())
   print '#endif'
 
   print '#ifdef DECLARE_CAUSE'
@@ -737,6 +839,13 @@ def make_supervisor_latex_table():
   print_insts('wfi')
   print_subtitle('Memory-Management Instructions')
   print_insts('sfence.vma')
+  print_subtitle('Hypervisor Memory-Management Instructions')
+  print_insts('hfence.vvma', 'hfence.gvma')
+  print_subtitle('Hypervisor Virtual-Machine Load and Store Instructions')
+  print_insts('hlv.b', 'hlv.bu', 'hlv.h', 'hlv.hu', 'hlvx.hu', 'hlv.w',
+        'hlvx.wu', 'hsv.b', 'hsv.h', 'hsv.w')
+  print_subtitle('Hypervisor Virtual-Machine Load and Store Instructions, RV64 only')
+  print_insts('hlv.wu', 'hlv.d', 'hsv.d')
   print_footer('\\caption{RISC-V Privileged Instructions}')
 
 def make_latex_table():
